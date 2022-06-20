@@ -11,10 +11,17 @@ namespace Amaretto {
 
 	class Canvas {
 	public:
-		Canvas(const Rect &p_rect);
+		Canvas(
+			const Rect &p_rect, bool p_record = false,
+			const CharInfo &p_bufferFillCh = CharInfo(' ')
+		);
 
-		void DrawChar(char_t p_ch, Vec2D p_pos, bool p_clr = true);
+		void DrawRecordBuffer();
+		void RecordDrawing(bool p_record);
+
+		void   DrawChar(char_t p_ch, Vec2D p_pos, bool p_clr = true);
 		char_t GetChar(Vec2D p_pos) const;
+		char_t GetCharScreen(Vec2D p_pos) const;
 
 		void ColorChar(Vec2D p_pos);
 
@@ -31,6 +38,7 @@ namespace Amaretto {
 		void ColorVLine(Vec2D p_pos, pos_t p_endY);
 
 		void PrintString(const string &p_str, Vec2D p_pos, bool p_cut = true, bool p_clr = true);
+		void PrintString(const wstring &p_str, Vec2D p_pos, bool p_cut = true, bool p_clr = true);
 		void PrintString(size_t p_num, const Vec2D &p_pos, bool p_cut = true, bool p_clr = true);
 
 		void FillRect(char_t p_ch, Rect p_rect, bool p_clr = true);
@@ -74,18 +82,35 @@ namespace Amaretto {
 		Color GetFgColor() const;
 		Color GetBgColor() const;
 
-		void SetCursorPos(Vec2D p_pos);
+		void         SetCursorPos(Vec2D p_pos);
+		const Vec2D &GetCursorPos() const;
 
-		const Rect &GetRect() const;
 		void        SetRect(const Rect &p_rect);
+		const Rect &GetRect() const;
+
+		void         SetPos(const Vec2D &p_pos);
+		const Vec2D &GetPos() const;
+		void CenterPos(const Rect &p_rect);
+
+		void         SetSize(const Vec2D &p_size);
+		const Vec2D &GetSize() const;
+
+		void SetRecordBuffer(const Buffer &p_buffer);
+		const Buffer &GetRecordBuffer() const;
+
+		const Vec2D &GetRecordBufferSize() const;
+
+		void SetRecordBufferFillChar(const CharInfo &p_bufferFillCh);
+		const CharInfo &GetRecordBufferFillChar() const;
 
 	private:
 		using drawFunc_t = std::function<void(Canvas&, char_t, const Vec2D&)>;
 
-		void SetCharUnsafe(char_t p_ch, const Vec2D &p_pos);
-		void ChangeCharUnsafe(char_t p_ch, const Vec2D &p_pos);
+		void   SetCharUnsafe(char_t p_ch, const Vec2D &p_pos);
+		void   ChangeCharUnsafe(char_t p_ch, const Vec2D &p_pos);
 		char_t GetCharUnsafe(const Vec2D &p_pos) const;
-		void ColorCharUnsafe(const Vec2D &p_pos);
+		char_t GetCharScreenUnsafe(const Vec2D &p_pos) const;
+		void   ColorCharUnsafe(const Vec2D &p_pos);
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
@@ -93,17 +118,22 @@ namespace Amaretto {
 
 #endif // AMARETTO_PLATFORM_LINUX
 
-		Color m_foreColor, m_backColor;
+		Color m_fg, m_bg;
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
-		size_t m_currColorPair;
+		short m_currColorPair;
 
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-		WORD m_lastAttribute;
+		WORD m_currAttr;
 
 #endif // AMARETTO_PLATFORM_WINDOWS
+
+		bool     m_record;
+		Buffer   m_buffer;
+		Vec2D    m_bufferSize;
+		CharInfo m_bufferFillCh;
 
 		Rect m_rect;
 	}; // class Canvas

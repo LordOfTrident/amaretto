@@ -25,11 +25,11 @@
 #ifdef AMARETTO_PLATFORM_UNKNOWN
 #	error Unknown platform
 #elif defined(AMARETTO_PLATFORM_APPLE)
-#	warning Apple platform detected, attempting to compile as linux
+#	pragma message "Apple platform detected, attempting to compile as linux"
 
 #	define AMARETTO_PLATFORM_LINUX
 #elif defined(AMARETTO_PLATFORM_UNIX)
-#	warning Unix platform detected, attempting to compile as linux
+#	pragma message "Unix platform detected, attempting to compile as linux"
 
 #	define AMARETTO_PLATFORM_LINUX
 #endif // PLATFORM_UNIX

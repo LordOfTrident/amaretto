@@ -4,9 +4,9 @@
 // class Canvas
 // public
 
-Amaretto::Canvas::Canvas(const Rect &p_rect):
-	m_foreColor(Color::Default),
-	m_backColor(Color::Default),
+Amaretto::Canvas::Canvas(const Rect &p_rect, bool p_record, const CharInfo &p_bufferFillCh):
+	m_fg(Color::Default),
+	m_bg(Color::Default),
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
@@ -14,14 +14,55 @@ Amaretto::Canvas::Canvas(const Rect &p_rect):
 
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-	m_lastAttribute(0),
+	m_currAttr(0),
 
 #endif // AMARETTO_PLATFORM_WINDOWS
 
+	m_record(p_record),
+	m_bufferSize(p_rect.size),
+	m_bufferFillCh(p_bufferFillCh),
 	m_rect(p_rect)
-{}
+{
+	m_buffer.resize(m_bufferSize.y, {});
+
+	for (auto &row : m_buffer)
+		row.resize(m_bufferSize.x, m_bufferFillCh);
+}
+
+void Amaretto::Canvas::DrawRecordBuffer() {
+	Vec2D pos(0, 0);
+
+	for (; pos.y < m_bufferSize.y; ++ pos.y) {
+		for (pos.x = 0; pos.x < m_bufferSize.x; ++ pos.x) {
+			SetColors(m_buffer[pos.y][pos.x].fg, m_buffer[pos.y][pos.x].bg);
+			SetCharUnsafe(m_buffer[pos.y][pos.x].ch, pos + m_rect.pos);
+		}
+	}
+}
+
+void Amaretto::Canvas::RecordDrawing(bool p_record) {
+	m_record = p_record;
+
+	if (m_record and m_bufferSize != m_rect.size) {
+		m_bufferSize = m_rect.size;
+
+		m_buffer.resize(m_bufferSize.y, {});
+
+		for (auto &row : m_buffer)
+			row.resize(m_bufferSize.x, m_bufferFillCh);
+	}
+}
 
 void Amaretto::Canvas::DrawChar(char_t p_ch, Vec2D p_pos, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	// convert the canvas position into screen position
 	p_pos += m_rect.pos;
 
@@ -30,22 +71,18 @@ void Amaretto::Canvas::DrawChar(char_t p_ch, Vec2D p_pos, bool p_clr) {
 	if (p_pos > m_rect or p_pos < m_rect)
 		return;
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	// extra windows boundary checks to prevent a segfault
-	if (p_pos > *g_window or p_pos < *g_window)
-		return;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	drawChar(*this, p_ch, p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 Amaretto::char_t Amaretto::Canvas::GetChar(Vec2D p_pos) const {
-	p_pos += m_rect.pos;
-
 	// return nothing if p_pos is out of bounds
 	if (p_pos > m_rect or p_pos < m_rect)
 		return '\0';
@@ -53,25 +90,65 @@ Amaretto::char_t Amaretto::Canvas::GetChar(Vec2D p_pos) const {
 		return '\0';
 
 	return GetCharUnsafe(p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
+}
+
+Amaretto::char_t Amaretto::Canvas::GetCharScreen(Vec2D p_pos) const {
+	p_pos += m_rect.pos;
+
+	if (p_pos > m_rect or p_pos < m_rect)
+		return '\0';
+	else if (p_pos > *g_window or p_pos < *g_window)
+		return '\0';
+
+	return GetCharScreenUnsafe(p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorChar(Vec2D p_pos) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	p_pos += m_rect.pos;
 
 	if (p_pos > m_rect or p_pos < m_rect)
 		return;
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	if (p_pos > *g_window or p_pos < *g_window)
-		return;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	ColorCharUnsafe(p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawHLine(char_t p_ch, Vec2D p_pos, pos_t p_endX, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	// if the size is 1, just draw a single char and dont waste time
 	if (p_pos.x == p_endX) {
 		DrawChar(p_ch, p_pos, p_clr);
@@ -102,36 +179,28 @@ void Amaretto::Canvas::DrawHLine(char_t p_ch, Vec2D p_pos, pos_t p_endX, bool p_
 	if (p_endX < p_pos.x)
 		std::swap(p_pos.x, p_endX);
 
-#ifdef AMARETTO_PLATFORM_LINUX
-
-	if (p_clr)
-		// with ncurses, we simply use mvhline to draw it for us
-		mvhline(p_pos.y, p_pos.x, p_ch, p_endX - p_pos.x + 1);
-	else {
-		for (; p_pos.x <= p_endX; ++ p_pos.x)
-			ChangeCharUnsafe(p_ch, p_pos);
-	}
-
-#elif defined(AMARETTO_PLATFORM_WINDOWS)
-
-	// on windows, we do a few other boundary checks
-	if (p_pos.y < g_window->pos.y or p_pos.y > g_window->size.y)
-		return;
-
-	if (p_pos.x < g_window->pos.x)
-		p_pos.x = g_window->pos.x;
-	else if (p_pos.x > g_window->size.x)
-		p_pos.x = g_window->size.x;
-
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	for (; p_pos.x <= p_endX; ++ p_pos.x)
 		drawChar(*this, p_ch, p_pos);
 
-#endif // AMARETTO_PLATFORM_WINDOWS
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawHLine(const string &p_str, Vec2D p_pos, pos_t p_endX, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_pos.x == p_endX) {
 		DrawChar(p_str[0], p_pos, p_clr);
 
@@ -159,22 +228,9 @@ void Amaretto::Canvas::DrawHLine(const string &p_str, Vec2D p_pos, pos_t p_endX,
 	if (p_endX < p_pos.x)
 		std::swap(p_pos.x, p_endX);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	// windows boundary checks (so we wont get a segfault)
-	if (p_pos.y < g_window->pos.y or p_pos.y > g_window->size.y)
-		return;
-
-	if (p_pos.x < g_window->pos.x)
-		p_pos.x = g_window->pos.x;
-	else if (p_pos.x > g_window->size.x)
-		p_pos.x = g_window->size.x;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
-	std::size_t strPos = 0;
+	size_t strPos = 0;
 
 	// here we have to draw the line manually on linux too
 	for (; p_pos.x <= p_endX; ++ p_pos.x) {
@@ -184,6 +240,12 @@ void Amaretto::Canvas::DrawHLine(const string &p_str, Vec2D p_pos, pos_t p_endX,
 		if (strPos >= p_str.length())
 			strPos = 0;
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawHLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_endX) {
@@ -217,28 +279,15 @@ void Amaretto::Canvas::DrawHLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_end
 	if (p_endX < p_pos.x)
 		std::swap(p_pos.x, p_endX);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	// windows boundary checks (so we wont get a segfault)
-	if (p_pos.y < g_window->pos.y or p_pos.y > g_window->size.y)
-		return;
-
-	if (p_pos.x < g_window->pos.x)
-		p_pos.x = g_window->pos.x;
-	else if (p_pos.x > g_window->size.x)
-		p_pos.x = g_window->size.x;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	Dir dir = p_patt.GetDir();
 
 	// yes, this is a repetitive way, but it is the most optimized one
 
 	Vec2D pattPos(0, 0);
 
-	Color prevFg = m_foreColor, prevBg = m_backColor;
+	Color prevFg = m_fg, prevBg = m_bg;
 
-	if (dir == Dir::Vert) {
+	if (dir == Dir::Vertical) {
 		for (; p_pos.x <= p_endX; ++ p_pos.x) {
 			const CharInfo &chInfo(p_patt.At(pattPos));
 
@@ -264,14 +313,29 @@ void Amaretto::Canvas::DrawHLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_end
 		}
 	}
 
-	if (prevFg != m_foreColor)
+	if (prevFg != m_fg)
 		SetFgColor(prevFg);
 
-	if (prevBg != m_backColor)
+	if (prevBg != m_bg)
 		SetBgColor(prevBg);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorHLine(Vec2D p_pos, pos_t p_endX) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_pos.x == p_endX) {
 		ColorChar(p_pos);
 
@@ -299,23 +363,26 @@ void Amaretto::Canvas::ColorHLine(Vec2D p_pos, pos_t p_endX) {
 	if (p_endX < p_pos.x)
 		std::swap(p_pos.x, p_endX);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	if (p_pos.y < g_window->pos.y or p_pos.y > g_window->size.y)
-		return;
-
-	if (p_pos.x < g_window->pos.x)
-		p_pos.x = g_window->pos.x;
-	else if (p_pos.x > g_window->size.x)
-		p_pos.x = g_window->size.x;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	for (; p_pos.x <= p_endX; ++ p_pos.x)
 		ColorCharUnsafe(p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawVLine(char_t p_ch, Vec2D p_pos, pos_t p_endY, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_pos.y == p_endY) {
 		DrawChar(p_ch, p_pos, p_clr);
 
@@ -343,34 +410,28 @@ void Amaretto::Canvas::DrawVLine(char_t p_ch, Vec2D p_pos, pos_t p_endY, bool p_
 	if (p_endY < p_pos.y)
 		std::swap(p_pos.y, p_endY);
 
-#ifdef AMARETTO_PLATFORM_LINUX
-
-	if (p_clr)
-		mvvline(p_pos.y, p_pos.x, p_ch, p_endY - p_pos.y + 1);
-	else {
-		for (; p_pos.y <= p_endY; ++ p_pos.y)
-			ChangeCharUnsafe(p_ch, p_pos);
-	}
-
-#elif defined(AMARETTO_PLATFORM_WINDOWS)
-
-	if (p_pos.x < g_window->pos.x or p_pos.x > g_window->size.x)
-		return;
-
-	if (p_pos.y < g_window->pos.y)
-		p_pos.y = g_window->pos.y;
-	else if (p_pos.y > g_window->size.y)
-		p_pos.y = g_window->size.y;
-
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	for (; p_pos.y <= p_endY; ++ p_pos.y)
 		drawChar(*this, p_ch, p_pos);
 
-#endif // AMARETTO_PLATFORM_WINDOWS
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawVLine(const string &p_str, Vec2D p_pos, pos_t p_endY, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_pos.y == p_endY) {
 		DrawChar(p_str[0], p_pos, p_clr);
 
@@ -398,21 +459,9 @@ void Amaretto::Canvas::DrawVLine(const string &p_str, Vec2D p_pos, pos_t p_endY,
 	if (p_endY < p_pos.y)
 		std::swap(p_pos.y, p_endY);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	if (p_pos.x < g_window->pos.x or p_pos.x > g_window->size.x)
-		return;
-
-	if (p_pos.y < g_window->pos.y)
-		p_pos.y = g_window->pos.y;
-	else if (p_pos.y > g_window->size.y)
-		p_pos.y = g_window->size.y;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
-	std::size_t strPos = 0;
+	size_t strPos = 0;
 
 	for (; p_pos.y <= p_endY; ++ p_pos.y) {
 		drawChar(*this, p_str[strPos], p_pos);
@@ -421,6 +470,12 @@ void Amaretto::Canvas::DrawVLine(const string &p_str, Vec2D p_pos, pos_t p_endY,
 		if (strPos >= p_str.length())
 			strPos = 0;
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawVLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_endY) {
@@ -454,24 +509,12 @@ void Amaretto::Canvas::DrawVLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_end
 	if (p_endY < p_pos.y)
 		std::swap(p_pos.y, p_endY);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	if (p_pos.x < g_window->pos.x or p_pos.x > g_window->size.x)
-		return;
-
-	if (p_pos.y < g_window->pos.y)
-		p_pos.y = g_window->pos.y;
-	else if (p_pos.y > g_window->size.y)
-		p_pos.y = g_window->size.y;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	Dir dir = p_patt.GetDir();
 	Vec2D pattPos(0, 0);
 
-	Color prevFg = m_foreColor, prevBg = m_backColor;
+	Color prevFg = m_fg, prevBg = m_bg;
 
-	if (dir == Dir::Horiz) {
+	if (dir == Dir::Horizontal) {
 		for (; p_pos.y <= p_endY; ++ p_pos.y) {
 			const CharInfo &chInfo(p_patt.At(pattPos));
 
@@ -497,14 +540,29 @@ void Amaretto::Canvas::DrawVLine(const Pattern &p_patt, Vec2D p_pos, pos_t p_end
 		}
 	}
 
-	if (prevFg != m_foreColor)
+	if (prevFg != m_fg)
 		SetFgColor(prevFg);
 
-	if (prevBg != m_backColor)
+	if (prevBg != m_bg)
 		SetBgColor(prevBg);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorVLine(Vec2D p_pos, pos_t p_endY) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_pos.y == p_endY) {
 		ColorChar(p_pos);
 
@@ -532,23 +590,26 @@ void Amaretto::Canvas::ColorVLine(Vec2D p_pos, pos_t p_endY) {
 	if (p_endY < p_pos.y)
 		std::swap(p_pos.y, p_endY);
 
-#ifdef AMARETTO_PLATFORM_WINDOWS
-
-	if (p_pos.x < g_window->pos.x or p_pos.x > g_window->size.x)
-		return;
-
-	if (p_pos.y < g_window->pos.y)
-		p_pos.y = g_window->pos.y;
-	else if (p_pos.y > g_window->size.y)
-		p_pos.y = g_window->size.y;
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
 	for (; p_pos.y <= p_endY; ++ p_pos.y)
 		ColorCharUnsafe(p_pos);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::PrintString(const string &p_str, Vec2D p_pos, bool p_wrap, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	p_pos += m_rect.pos;
 
 	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
@@ -559,7 +620,19 @@ void Amaretto::Canvas::PrintString(const string &p_str, Vec2D p_pos, bool p_wrap
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	pos_t start = p_pos.x;
-	for (auto ch : p_str) {
+	for (size_t i = 0; i < p_str.length(); ++ i) {
+		wchar_t ch = p_str[i];
+
+		if (p_wrap and ch == '\n') {
+			p_pos.x = start;
+			++ p_pos.y;
+
+			if (p_pos.y > endPos.y)
+				break;
+
+			continue;
+		}
+
 		if (p_pos.x > endPos.x) {
 			if (p_wrap) {
 				p_pos.x = start;
@@ -571,21 +644,97 @@ void Amaretto::Canvas::PrintString(const string &p_str, Vec2D p_pos, bool p_wrap
 				goto l_skip;
 		}
 
-#ifdef AMARETTO_PLATFORM_LINUX
+		if ((p_str[i] & 128) == 0)
+			ch = p_str[i] & 127;
+		else if ((p_str[i] & 224) == 192 && i + 1 < p_str.length()) {
+			ch =
+				(p_str[i]     & 31) << 6 |
+				(p_str[i + 1] & 63);
+
+			++ i;
+		} else if ((p_str[i] & 240) == 224 && i + 2 < p_str.length()) {
+			ch =
+				(p_str[i]     & 15) << 12 |
+				(p_str[i + 1] & 63) << 6  |
+				(p_str[i + 2] & 63);
+
+			i += 2;
+		} else if (i + 3 < p_str.length()) {
+			ch =
+				(p_str[i]     & 7)  << 18 |
+				(p_str[i + 1] & 63) << 12 |
+				(p_str[i + 2] & 63) << 6  |
+				(p_str[i + 3] & 63);
+
+			i += 4;
+		}
 
 		drawChar(*this, ch, p_pos);
-
-#elif defined(AMARETTO_PLATFORM_WINDOWS)
-
-		// make sure we wont get a segfault
-		if (not (p_pos > *g_window or p_pos < *g_window or p_pos.y < m_rect.pos.y))
-			drawChar(*this, ch, p_pos);
-
-#endif // AMARETTO_PLATFORM_WINDOWS
 
 	l_skip:
 		++ p_pos.x;
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
+}
+
+void Amaretto::Canvas::PrintString(const wstring &p_str, Vec2D p_pos, bool p_wrap, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
+	p_pos += m_rect.pos;
+
+	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
+
+	if (p_pos.y > endPos.y)
+		return;
+
+	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
+
+	pos_t start = p_pos.x;
+	for (auto ch : p_str) {
+		if (p_wrap and ch == '\n') {
+			p_pos.x = start;
+			++ p_pos.y;
+
+			if (p_pos.y > endPos.y)
+				break;
+
+			continue;
+		}
+
+		if (p_pos.x > endPos.x) {
+			if (p_wrap) {
+				p_pos.x = start;
+				++ p_pos.y;
+
+				if (p_pos.y > endPos.y)
+					break;
+			} else
+				goto l_skip;
+		}
+
+		drawChar(*this, ch, p_pos);
+
+	l_skip:
+		++ p_pos.x;
+	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::PrintString(size_t p_num, const Vec2D &p_pos, bool p_wrap, bool p_clr) {
@@ -593,6 +742,15 @@ void Amaretto::Canvas::PrintString(size_t p_num, const Vec2D &p_pos, bool p_wrap
 }
 
 void Amaretto::Canvas::FillRect(char_t p_ch, Rect p_rect, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_rect.size.x == 0 or p_rect.size.y == 0)
 		return; // if the size is 0 we wont draw it
 	else if (p_rect.size == Vec2D(1, 1)) {
@@ -621,6 +779,7 @@ void Amaretto::Canvas::FillRect(char_t p_ch, Rect p_rect, bool p_clr) {
 		p_rect.pos.y   = m_rect.pos.y;
 	}
 
+
 	Vec2D end(p_rect.pos + p_rect.size - Vec2D(1, 1));
 	Vec2D pos(p_rect.pos);
 
@@ -633,27 +792,27 @@ void Amaretto::Canvas::FillRect(char_t p_ch, Rect p_rect, bool p_clr) {
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	for (; pos.y <= end.y; ++ pos.y) {
+		for (pos.x = p_rect.pos.x; pos.x <= end.x; ++ pos.x)
+			drawChar(*this, p_ch, pos);
+	}
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
-		if (p_clr)
-			mvhline(pos.y, pos.x, p_ch, p_rect.size.x);
-		else {
-			for (pos.x = p_rect.pos.x; pos.x <= end.x; ++ pos.x)
-				drawChar(*this, p_ch, pos);
-		}
+	move(g_cursorPos.y, g_cursorPos.x);
 
-#elif defined(AMARETTO_PLATFORM_WINDOWS)
-
-		for (pos.x = p_rect.pos.x; pos.x <= end.x; ++ pos.x)
-			drawChar(*this, p_ch, pos);
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
-	}
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::FillRect(const string &p_str, Rect p_rect, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_rect.size.x == 0 or p_rect.size.y == 0)
 		return;
 	else if (p_rect.size == Vec2D(1, 1)) {
@@ -694,7 +853,7 @@ void Amaretto::Canvas::FillRect(const string &p_str, Rect p_rect, bool p_clr) {
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
 	for (; pos.y <= end.y; ++ pos.y) {
-		std::size_t strPos = 0;
+		size_t strPos = 0;
 
 		for (pos.x = p_rect.pos.x; pos.x <= end.x; ++ pos.x) {
 			drawChar(*this, p_str[strPos], pos);
@@ -704,6 +863,12 @@ void Amaretto::Canvas::FillRect(const string &p_str, Rect p_rect, bool p_clr) {
 				strPos = 0;
 		}
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::FillRect(const Pattern &p_patt, Rect p_rect) {
@@ -750,9 +915,9 @@ void Amaretto::Canvas::FillRect(const Pattern &p_patt, Rect p_rect) {
 	Dir dir = p_patt.GetDir();
 	Vec2D pattPos(0, 0);
 
-	Color prevFg = m_foreColor, prevBg = m_backColor;
+	Color prevFg = m_fg, prevBg = m_bg;
 
-	if (dir == Dir::Vert) {
+	if (dir == Dir::Vertical) {
 		for (; pos.x <= end.x; ++ pos.x) {
 			for (pos.y = p_rect.pos.y; pos.y <= end.y; ++ pos.y) {
 				const CharInfo &chInfo(p_patt.At(pattPos));
@@ -794,14 +959,29 @@ void Amaretto::Canvas::FillRect(const Pattern &p_patt, Rect p_rect) {
 		}
 	}
 
-	if (prevFg != m_foreColor)
+	if (prevFg != m_fg)
 		SetFgColor(prevFg);
 
-	if (prevBg != m_backColor)
+	if (prevBg != m_bg)
 		SetBgColor(prevBg);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorFillRect(Rect p_rect) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	if (p_rect.size.x == 0 or p_rect.size.y == 0)
 		return;
 	else if (p_rect.size == Vec2D(1, 1)) {
@@ -843,50 +1023,75 @@ void Amaretto::Canvas::ColorFillRect(Rect p_rect) {
 		for (pos.x = p_rect.pos.x; pos.x <= end.x; ++ pos.x)
 			ColorCharUnsafe(pos);
 	}
-}
-
-void Amaretto::Canvas::FillRect(char_t p_ch, bool p_clr) {
-	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
-
-	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
-
-	for (pos_t y = m_rect.pos.y; y <= endPos.y; ++ y) {
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
-		if (p_clr)
-			mvhline(y, m_rect.pos.x, p_ch, m_rect.size.x);
-		else {
-			for (pos_t x = m_rect.pos.x; x <= endPos.x; ++ x)
-				drawChar(*this, p_ch, Vec2D(x, y));
-		}
+	move(g_cursorPos.y, g_cursorPos.x);
 
-#elif defined(AMARETTO_PLATFORM_WINDOWS)
-
-		for (pos_t x = m_rect.pos.x; x <= endPos.x; ++ x)
-			drawChar(*this, p_ch, Vec2D(x, y));
-
-#endif // AMARETTO_PLATFORM_WINDOWS
-
-	}
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
-void Amaretto::Canvas::FillRect(const string &p_str, bool p_clr) {
+void Amaretto::Canvas::FillRect(char_t p_ch, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
 
 	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
 
-	for (pos_t y = m_rect.pos.y; y <= endPos.y; ++ y) {
-		std::size_t strPos = 0;
+	Vec2D pos(0, 0);
 
-		for (pos_t x = m_rect.pos.x; x <= endPos.x; ++ x) {
-			drawChar(*this, p_str[strPos], Vec2D(x, y));
+	for (pos.y = m_rect.pos.y; pos.y <= endPos.y; ++ pos.y) {
+		for (pos.x = m_rect.pos.x; pos.x <= endPos.x; ++ pos.x)
+			drawChar(*this, p_ch, pos);
+	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
+}
+
+void Amaretto::Canvas::FillRect(const string &p_str, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
+	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
+
+	drawFunc_t drawChar = p_clr? &Canvas::SetCharUnsafe : &Canvas::ChangeCharUnsafe;
+
+	Vec2D pos(0, 0);
+
+	for (pos.y = m_rect.pos.y; pos.y <= endPos.y; ++ pos.y) {
+		size_t strPos = 0;
+
+		for (pos.x = m_rect.pos.x; pos.x <= endPos.x; ++ pos.x) {
+			drawChar(*this, p_str[strPos], pos);
 
 			++ strPos;
 			if (strPos >= p_str.length())
 				strPos = 0;
 		}
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::FillRect(const Pattern &p_patt) {
@@ -896,15 +1101,17 @@ void Amaretto::Canvas::FillRect(const Pattern &p_patt) {
 	Dir dir = p_patt.GetDir();
 	Vec2D pattPos(0, 0);
 
-	Color prevFg = m_foreColor, prevBg = m_backColor;
+	Color prevFg = m_fg, prevBg = m_bg;
 
-	if (dir == Dir::Vert) {
-		for (pos_t x = startPos.x; x <= endPos.x; ++ x) {
-			for (pos_t y = startPos.y; y <= endPos.y; ++ y) {
+	Vec2D pos(0, 0);
+
+	if (dir == Dir::Vertical) {
+		for (pos.x = startPos.x; pos.x <= endPos.x; ++ pos.x) {
+			for (pos.y = startPos.y; pos.y <= endPos.y; ++ pos.y) {
 				const CharInfo &chInfo(p_patt.At(pattPos));
 
 				SetColors(chInfo.fg, chInfo.bg);
-				SetCharUnsafe(chInfo.ch, Vec2D(x, y));
+				SetCharUnsafe(chInfo.ch, pos);
 
 				++ pattPos.x;
 
@@ -919,12 +1126,12 @@ void Amaretto::Canvas::FillRect(const Pattern &p_patt) {
 				pattPos.y = 0;
 		}
 	} else {
-		for (pos_t x = startPos.x; x <= endPos.x; ++ x) {
-			for (pos_t y = startPos.y; y <= endPos.y; ++ y) {
+		for (pos.x = startPos.x; pos.x <= endPos.x; ++ pos.x) {
+			for (pos.y = startPos.y; pos.y <= endPos.y; ++ pos.y) {
 				const CharInfo &chInfo(p_patt.At(pattPos));
 
 				SetColors(chInfo.fg, chInfo.bg);
-				SetCharUnsafe(chInfo.ch, Vec2D(x, y));
+				SetCharUnsafe(chInfo.ch, pos);
 
 				++ pattPos.y;
 
@@ -940,20 +1147,42 @@ void Amaretto::Canvas::FillRect(const Pattern &p_patt) {
 		}
 	}
 
-	if (prevFg != m_foreColor)
+	if (prevFg != m_fg)
 		SetFgColor(prevFg);
 
-	if (prevBg != m_backColor)
+	if (prevBg != m_bg)
 		SetBgColor(prevBg);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorFillRect() {
-	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
+#ifdef AMARETTO_PLATFORM_LINUX
 
-	for (pos_t y = m_rect.pos.y; y <= endPos.y; ++ y) {
-		for (pos_t x = m_rect.pos.x; x <= endPos.x; ++ x)
-			ColorCharUnsafe(Vec2D(x, y));
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
 	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
+	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
+	Vec2D pos(0, 0);
+
+	for (pos.y = m_rect.pos.y; pos.y <= endPos.y; ++ pos.y) {
+		for (pos.x = m_rect.pos.x; pos.x <= endPos.x; ++ pos.x)
+			ColorCharUnsafe(pos);
+	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawRect(char_t p_ch, Rect p_rect, bool p_clr) {
@@ -1081,36 +1310,96 @@ void Amaretto::Canvas::DrawBorder(const Border &p_border, Rect p_rect, bool p_cl
 		return;
 	}
 
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	Color prevFg = m_fg;
+
+#elif defined(AMARETTO_PLATFORM_WINDOWS)
+
+	WORD prevAttr = m_currAttr;
+
+#endif // AMARETTO_PLATFORM_WINDOWS
+
 	Vec2D endPos(p_rect.pos + p_rect.size - Vec2D(1, 1));
 
-	DrawHLine(p_border.hChar, Vec2D(p_rect.pos.x, p_rect.pos.y), endPos.x, p_clr);
-	DrawHLine(p_border.hChar, Vec2D(p_rect.pos.x, endPos.y),     endPos.x, p_clr);
+	DrawHLine(p_border.hChar, Vec2D(p_rect.pos.x, endPos.y), endPos.x, p_clr);
+	DrawVLine(p_border.vChar, Vec2D(endPos.x, p_rect.pos.y), endPos.y, p_clr);
 
-	DrawVLine(p_border.vChar, Vec2D(p_rect.pos.x, p_rect.pos.y), endPos.y, p_clr);
-	DrawVLine(p_border.vChar, Vec2D(endPos.x,     p_rect.pos.y), endPos.y, p_clr);
+	DrawChar(p_border.brChar, endPos, p_clr);
+
+	SetFgColor(p_border.shadeColor);
+
+	DrawHLine(p_border.hChar, p_rect.pos, endPos.x, p_clr);
+	DrawVLine(p_border.vChar, p_rect.pos, endPos.y, p_clr);
 
 	DrawChar(p_border.tlChar, p_rect.pos, p_clr);
-	DrawChar(p_border.trChar, Vec2D(endPos.x, p_rect.pos.y), p_clr);
-	DrawChar(p_border.brChar, endPos, p_clr);
 	DrawChar(p_border.blChar, Vec2D(p_rect.pos.x, endPos.y), p_clr);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	SetFgColor(prevFg);
+
+#elif defined(AMARETTO_PLATFORM_WINDOWS)
+
+	m_currAttr = prevAttr;
+
+#endif // AMARETTO_PLATFORM_WINDOWS
+
+	DrawChar(p_border.trChar, Vec2D(endPos.x, p_rect.pos.y), p_clr);
 }
 
 void Amaretto::Canvas::DrawBorder(const Border &p_border, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	Color prevFg = m_fg;
+
+#elif defined(AMARETTO_PLATFORM_WINDOWS)
+
+	WORD prevAttr = m_currAttr;
+
+#endif // AMARETTO_PLATFORM_WINDOWS
+
 	Vec2D size(m_rect.size - Vec2D(1, 1));
 
-	DrawHLine(p_border.hChar, Vec2D(1, 0),      size.x - 1, p_clr);
 	DrawHLine(p_border.hChar, Vec2D(1, size.y), size.x - 1, p_clr);
-
-	DrawVLine(p_border.vChar, Vec2D(0,      1), size.y - 1, p_clr);
 	DrawVLine(p_border.vChar, Vec2D(size.x, 1), size.y - 1, p_clr);
 
-	DrawChar(p_border.tlChar, Vec2D(0,      0), p_clr);
-	DrawChar(p_border.trChar, Vec2D(size.x, 0), p_clr);
 	DrawChar(p_border.brChar, size, p_clr);
+
+	SetFgColor(p_border.shadeColor);
+
+	DrawHLine(p_border.hChar, Vec2D(1, 0), size.x - 1, p_clr);
+	DrawVLine(p_border.vChar, Vec2D(0, 1), size.y - 1, p_clr);
+
+	DrawChar(p_border.tlChar, Vec2D(0, 0), p_clr);
 	DrawChar(p_border.blChar, Vec2D(0, size.y), p_clr);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	SetFgColor(prevFg);
+
+#elif defined(AMARETTO_PLATFORM_WINDOWS)
+
+	m_currAttr = prevAttr;
+
+#endif // AMARETTO_PLATFORM_WINDOWS
+
+	DrawChar(p_border.trChar, Vec2D(size.x, 0), p_clr);
 }
 
 void Amaretto::Canvas::DrawLine(char_t p_ch, Vec2D p_posA, Vec2D p_posB, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
+	p_posA += m_rect.pos;
+	p_posB += m_rect.pos;
+
 	// Bresenhams line algorithm
 
 	bool swap = std::fabs(p_posB.y - p_posA.y) > std::fabs(p_posB.x - p_posA.x);
@@ -1140,9 +1429,24 @@ void Amaretto::Canvas::DrawLine(char_t p_ch, Vec2D p_posA, Vec2D p_posB, bool p_
 			error    += distX;
 		}
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawLine(const string &p_str, Vec2D p_posA, Vec2D p_posB, bool p_clr) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (p_clr and g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	bool swap = std::fabs(p_posB.y - p_posA.y) > std::fabs(p_posB.x - p_posA.x);
 	if (swap) {
 		std::swap(p_posA.x, p_posA.y);
@@ -1161,7 +1465,7 @@ void Amaretto::Canvas::DrawLine(const string &p_str, Vec2D p_posA, Vec2D p_posB,
 	float error = distX / 2;
 	pos_t stepY = (p_posA.y < p_posB.y)? 1 : -1;
 
-	std::size_t strPos = 0;
+	size_t strPos = 0;
 
 	for (; p_posA.x <= p_posB.x; ++ p_posA.x) {
 		drawChar(*this, p_str[strPos], swap? Vec2D(p_posA.y, p_posA.x) : p_posA);
@@ -1176,6 +1480,12 @@ void Amaretto::Canvas::DrawLine(const string &p_str, Vec2D p_posA, Vec2D p_posB,
 		if (strPos >= p_str.length())
 			strPos = 0;
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::DrawLine(const Pattern &p_patt, Vec2D p_posA, Vec2D p_posB) {
@@ -1198,7 +1508,7 @@ void Amaretto::Canvas::DrawLine(const Pattern &p_patt, Vec2D p_posA, Vec2D p_pos
 	Dir dir = p_patt.GetDir();
 	Vec2D pattPos(0, 0);
 
-	Color prevFg = m_foreColor, prevBg = m_backColor;
+	Color prevFg = m_fg, prevBg = m_bg;
 
 	if (dir == Dir::Auto) {
 		for (; p_posA.x <= p_posB.x; ++ p_posA.x) {
@@ -1220,7 +1530,7 @@ void Amaretto::Canvas::DrawLine(const Pattern &p_patt, Vec2D p_posA, Vec2D p_pos
 		}
 	} else {
 		bool pattSwap = swap;
-		if (dir == Dir::Vert)
+		if (dir == Dir::Vertical)
 			pattSwap = not pattSwap;
 
 		Vec2D pattSize(p_patt.GetSize());
@@ -1251,14 +1561,29 @@ void Amaretto::Canvas::DrawLine(const Pattern &p_patt, Vec2D p_posA, Vec2D p_pos
 		}
 	}
 
-	if (prevFg != m_foreColor)
+	if (prevFg != m_fg)
 		SetFgColor(prevFg);
 
-	if (prevBg != m_backColor)
+	if (prevBg != m_bg)
 		SetBgColor(prevBg);
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::ColorLine(Vec2D p_posA, Vec2D p_posB) {
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	if (g_currColorPair != m_currColorPair) {
+		attroff(COLOR_PAIR(g_currColorPair));
+		attron(COLOR_PAIR(m_currColorPair));
+	}
+
+#endif // AMARETTO_PLATFORM_LINUX
+
 	bool swap = std::fabs(p_posB.y - p_posA.y) > std::fabs(p_posB.x - p_posA.x);
 	if (swap) {
 		std::swap(p_posA.x, p_posA.y);
@@ -1284,15 +1609,22 @@ void Amaretto::Canvas::ColorLine(Vec2D p_posA, Vec2D p_posB) {
 			error    += distX;
 		}
 	}
+
+#ifdef AMARETTO_PLATFORM_LINUX
+
+	move(g_cursorPos.y, g_cursorPos.x);
+
+#endif // AMARETTO_PLATFORM_LINUX
 }
 
 void Amaretto::Canvas::SetColors(Color p_fg, Color p_bg) {
 #ifdef AMARETTO_PLATFORM_LINUX
 
-	attroff(COLOR_PAIR(m_currColorPair));
+	attroff(COLOR_PAIR(g_currColorPair));
 
 	// make sure we wont create a duplicated color pair (waste of color pairs)
 	m_currColorPair = CheckForColorPair(p_fg, p_bg);
+	g_currColorPair = m_currColorPair;
 
 	attron(COLOR_PAIR(m_currColorPair));
 
@@ -1311,28 +1643,29 @@ void Amaretto::Canvas::SetColors(Color p_fg, Color p_bg) {
 	if (p_fg == Color::Default)
 		fg = static_cast<WORD>(Color::White);
 
-	m_lastAttribute = static_cast<WORD>(fg) | bg; // save the attribute
+	m_currAttr = static_cast<WORD>(fg) | bg; // save the attribute
 
 #endif // AMARETTO_PLATFORM_WINDOWS
 
-	m_foreColor = p_fg;
-	m_backColor = p_bg;
+	m_fg = p_fg;
+	m_bg = p_bg;
 }
 
 void Amaretto::Canvas::SetFgColor(Color p_fg) {
 #ifdef AMARETTO_PLATFORM_LINUX
 
-	attroff(COLOR_PAIR(m_currColorPair));
+	attroff(COLOR_PAIR(g_currColorPair));
 
-	m_currColorPair = CheckForColorPair(p_fg, m_backColor);
+	m_currColorPair = CheckForColorPair(p_fg, m_bg);
+	g_currColorPair = m_currColorPair;
 
 	attron(COLOR_PAIR(m_currColorPair));
 
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-	WORD bg = static_cast<WORD>(m_backColor);
+	WORD bg = static_cast<WORD>(m_bg);
 
-	if (m_backColor == Color::Default)
+	if (m_bg == Color::Default)
 		bg = static_cast<WORD>(Color::Black);
 	else if (bg != 0)
 		bg *= COLOR_BACKGROUND_OFFSET;
@@ -1342,19 +1675,20 @@ void Amaretto::Canvas::SetFgColor(Color p_fg) {
 	if (p_fg == Color::Default)
 		fg = static_cast<WORD>(Color::White);
 
-	m_lastAttribute = static_cast<WORD>(fg) | bg;
+	m_currAttr = static_cast<WORD>(fg) | bg;
 
 #endif // AMARETTO_PLATFORM_WINDOWS
 
-	m_foreColor = p_fg;
+	m_fg = p_fg;
 }
 
 void Amaretto::Canvas::SetBgColor(Color p_bg) {
 #ifdef AMARETTO_PLATFORM_LINUX
 
-	attroff(COLOR_PAIR(m_currColorPair));
+	attroff(COLOR_PAIR(g_currColorPair));
 
-	m_currColorPair = CheckForColorPair(m_foreColor, p_bg);
+	m_currColorPair = CheckForColorPair(m_fg, p_bg);
+	g_currColorPair = m_currColorPair;
 
 	attron(COLOR_PAIR(m_currColorPair));
 
@@ -1367,28 +1701,44 @@ void Amaretto::Canvas::SetBgColor(Color p_bg) {
 	else if (bg != 0)
 		bg *= COLOR_BACKGROUND_OFFSET;
 
-	WORD fg = static_cast<WORD>(m_foreColor);
+	WORD fg = static_cast<WORD>(m_fg);
 
-	if (m_foreColor == Color::Default)
+	if (m_fg == Color::Default)
 		fg = static_cast<WORD>(Color::White);
 
-	m_lastAttribute = static_cast<WORD>(fg) | bg;
+	m_currAttr = static_cast<WORD>(fg) | bg;
 
 #endif // AMARETTO_PLATFORM_WINDOWS
 
-	m_backColor = p_bg;
+	m_bg = p_bg;
 }
 
 Amaretto::Color Amaretto::Canvas::GetFgColor() const {
-	return m_foreColor;
+	return m_fg;
 }
 
 Amaretto::Color Amaretto::Canvas::GetBgColor() const {
-	return m_backColor;
+	return m_bg;
 }
 
 void Amaretto::Canvas::SetCursorPos(Vec2D p_pos) {
 	p_pos += m_rect.pos;
+
+	Vec2D endPos(m_rect.pos + m_rect.size - Vec2D(1, 1));
+
+	if (p_pos.x < m_rect.pos.x)
+		p_pos.x = m_rect.pos.x;
+
+	if (p_pos.y < m_rect.pos.y)
+		p_pos.y = m_rect.pos.y;
+
+	if (p_pos.x > endPos.x)
+		p_pos.x = endPos.x;
+
+	if (p_pos.y > endPos.y)
+		p_pos.y = endPos.y;
+
+	g_cursorPos = p_pos;
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
@@ -1407,13 +1757,80 @@ void Amaretto::Canvas::SetCursorPos(Vec2D p_pos) {
 #endif // AMARETTO_PLATFORM_WINDOWS
 }
 
-const Amaretto::Rect &Amaretto::Canvas::GetRect() const {
-	return m_rect;
+const Amaretto::Vec2D &Amaretto::Canvas::GetCursorPos() const {
+	return g_cursorPos;
 }
 
 void Amaretto::Canvas::SetRect(const Rect &p_rect) {
 	m_rect.size = p_rect.size;
 	m_rect.pos  = p_rect.pos;
+
+	if (m_record) {
+		m_bufferSize = m_rect.size;
+
+		m_buffer.resize(m_bufferSize.y, {});
+
+		for (auto &row : m_buffer)
+			row.resize(m_bufferSize.x, m_bufferFillCh);
+	}
+}
+
+const Amaretto::Rect &Amaretto::Canvas::GetRect() const {
+	return m_rect;
+}
+
+void Amaretto::Canvas::SetPos(const Vec2D &p_pos) {
+	m_rect.pos = p_pos;
+}
+
+const Amaretto::Vec2D &Amaretto::Canvas::GetPos() const {
+	return m_rect.pos;
+}
+
+void Amaretto::Canvas::CenterPos(const Rect &p_rect) {
+	m_rect.pos = CalcCenterPos(m_rect.size, p_rect);
+}
+
+void Amaretto::Canvas::SetSize(const Vec2D &p_size) {
+	m_rect.size = p_size;
+
+	if (m_record) {
+		m_bufferSize = m_rect.size;
+
+		m_buffer.resize(m_bufferSize.y, {});
+
+		for (auto &row : m_buffer)
+			row.resize(m_bufferSize.x, m_bufferFillCh);
+	}
+}
+
+const Amaretto::Vec2D &Amaretto::Canvas::GetSize() const {
+	return m_rect.size;
+}
+
+void Amaretto::Canvas::SetRecordBuffer(const Buffer &p_buffer) {
+	m_buffer = p_buffer;
+
+	m_buffer.resize(m_bufferSize.y, {});
+
+	for (auto &row : m_buffer)
+		row.resize(m_bufferSize.x, m_bufferFillCh);
+}
+
+const Amaretto::Buffer &Amaretto::Canvas::GetRecordBuffer() const {
+	return m_buffer;
+}
+
+const Amaretto::Vec2D &Amaretto::Canvas::GetRecordBufferSize() const {
+	return m_bufferSize;
+}
+
+void Amaretto::Canvas::SetRecordBufferFillChar(const CharInfo &p_bufferFillCh) {
+	m_bufferFillCh = p_bufferFillCh;
+}
+
+const Amaretto::CharInfo &Amaretto::Canvas::GetRecordBufferFillChar() const {
+	return m_bufferFillCh;
 }
 
 // private
@@ -1421,56 +1838,200 @@ void Amaretto::Canvas::SetRect(const Rect &p_rect) {
 void Amaretto::Canvas::SetCharUnsafe(char_t p_ch, const Vec2D &p_pos) {
 	// basic char drawing function to shorten code
 
-	// draw control chars as empty spaces
-	if (p_ch < 32 or p_ch >= 127)
-		p_ch = 32;
-
 #ifdef AMARETTO_PLATFORM_LINUX
 
-	mvaddch(p_pos.y, p_pos.x, p_ch);
+	if (p_ch >= g_wCharStart) {
+
+#	ifdef AMARETTO_WIDECHAR
+
+		cchar_t cch;
+		wchar_t wchs[CCHARW_MAX] = {p_ch, 0, 0, 0, 0};
+
+		setcchar(&cch, wchs, 0, 0, nullptr);
+
+		mvadd_wch(p_pos.y, p_pos.x, &cch);
+
+#	else
+
+		if (g_wCharToACSMap.count(p_ch) == 0)
+			mvaddch(p_pos.y, p_pos.x, '?');
+		else {
+			attron(A_ALTCHARSET);
+
+			mvaddch(p_pos.y, p_pos.x, g_wCharToACSMap[p_ch]);
+
+			attroff(A_ALTCHARSET);
+		}
+
+#	endif // AMARETTO_WIDECHAR
+
+	} else {
+		if (p_ch < 32 or p_ch == 127)
+			p_ch = 32;
+
+		mvaddch(p_pos.y, p_pos.x, p_ch);
+	}
 
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-	// converting 2D pos to 1D pos
-	std::size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+	if (p_pos < *g_window or p_pos > *g_window)
+		return;
 
-	g_screen[pos].Char.AsciiChar = p_ch;
-	g_screen[pos].Attributes     = m_lastAttribute;
+	if (p_ch < 32 or p_ch == 127)
+		p_ch = 32;
+
+	// converting 2D pos to 1D pos
+	size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+
+	g_screen[pos].Char.UnicodeChar = p_ch;
+	g_screen[pos].Attributes       = m_currAttr;
 
 #endif // AMARETTO_PLATFORM_WINDOWS
+
+	if (m_record) {
+		Vec2D pos = p_pos - m_rect.pos;
+
+		m_buffer[pos.y][pos.x].ch = p_ch;
+		m_buffer[pos.y][pos.x].fg = m_fg;
+		m_buffer[pos.y][pos.x].bg = m_bg;
+	}
 }
 
 void Amaretto::Canvas::ChangeCharUnsafe(char_t p_ch, const Vec2D &p_pos) {
-	// draw control chars as empty spaces
-	if (p_ch < 32 or p_ch >= 127)
-		p_ch = 32;
+	Color fg = Color::Default, bg = Color::Default;
 
 #ifdef AMARETTO_PLATFORM_LINUX
+#	ifdef AMARETTO_WIDECHAR
+
+	cchar_t cchIn;
+	mvin_wch(p_pos.y, p_pos.x, &cchIn);
+
+	if (m_record) {
+		attr_t  attrs;
+		short   colorPair;
+		wchar_t wch;
+		getcchar(&cchIn, &wch, &attrs, &colorPair, nullptr);
+
+		short a, b;
+		pair_content(colorPair, &a, &b);
+
+		fg = static_cast<Color>(a);
+		bg = static_cast<Color>(b);
+	}
+
+	attron(cchIn.attr);
+
+#	else
 
 	chtype ch = mvinch(p_pos.y, p_pos.x);
 
+	if (m_record) {
+		short colorPair = ch & A_COLOR;
+		short a, b;
+		pair_content(PAIR_NUMBER(colorPair), &a, &b);
+
+		fg = static_cast<Color>(a);
+		bg = static_cast<Color>(b);
+	}
+
 	attron(ch & A_ATTRIBUTES);
 
-	mvaddch(p_pos.y, p_pos.x, p_ch);
+#	endif // AMARETTO_WIDECHAR
+
+	if (p_ch >= g_wCharStart) {
+
+#	ifdef AMARETTO_WIDECHAR
+
+		cchar_t cch;
+		wchar_t wchs[CCHARW_MAX] = {p_ch, 0, 0, 0, 0};
+
+		setcchar(&cch, wchs, 0, 0, nullptr);
+
+		mvadd_wch(p_pos.y, p_pos.x, &cch);
+
+#	else
+
+		if (g_wCharToACSMap.count(p_ch) == 0)
+			mvaddch(p_pos.y, p_pos.x, '?');
+		else {
+			attron(A_ALTCHARSET);
+
+			mvaddch(p_pos.y, p_pos.x, g_wCharToACSMap[p_ch]);
+
+			attroff(A_ALTCHARSET);
+		}
+
+#	endif // AMARETTO_WIDECHAR
+
+	} else {
+		if (p_ch < 32 or p_ch == 127)
+			p_ch = 32;
+
+		mvaddch(p_pos.y, p_pos.x, p_ch);
+	}
+
+#	ifdef AMARETTO_WIDECHAR
+
+	attroff(cchIn.attr);
+	attron(COLOR_PAIR(m_currColorPair));
+
+#	else
 
 	attroff(ch & A_ATTRIBUTES);
 	attron(COLOR_PAIR(m_currColorPair));
 
+#	endif // AMARETTO_WIDECHAR
+
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-	std::size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+	if (p_pos < *g_window or p_pos > *g_window)
+		return;
 
-	g_screen[pos].Char.AsciiChar = p_ch;
+	if (p_ch < 32 or p_ch == 127)
+		p_ch = 32;
+
+	// converting 2D pos to 1D pos
+	size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+
+	g_screen[pos].Char.UnicodeChar = p_ch;
+
+	WORD a = g_screen[pos].Attributes & 0xF;
+	WORD b = g_screen[pos].Attributes & 0xF * COLOR_BACKGROUND_OFFSET;
+
+	fg = static_cast<Color>(a);
+	bg = static_cast<Color>(b);
 
 #endif // AMARETTO_PLATFORM_WINDOWS
+
+	if (m_record) {
+		Vec2D pos = p_pos - m_rect.pos;
+
+		m_buffer[pos.y][pos.x].ch = p_ch;
+		m_buffer[pos.y][pos.x].fg = fg;
+		m_buffer[pos.y][pos.x].bg = bg;
+	}
 }
 
 Amaretto::char_t Amaretto::Canvas::GetCharUnsafe(const Vec2D &p_pos) const {
+	return m_buffer[p_pos.y][p_pos.x].ch;
+}
+
+Amaretto::char_t Amaretto::Canvas::GetCharScreenUnsafe(const Vec2D &p_pos) const {
 
 #ifdef AMARETTO_PLATFORM_LINUX
 
+#	ifdef AMARETTO_WIDECHAR
+
+	cchar_t cchIn;
+	mvin_wch(p_pos.y, p_pos.x, &cchIn);
+
+	return cchIn.chars[0];
+
+#	else
+
 	return mvinch(p_pos.y, p_pos.x);
 
+#	endif // AMARETTO_WIDECHAR
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
 	return g_screen[p_pos.y * g_window->size.x + p_pos.x].Char.AsciiChar;
@@ -1479,19 +2040,52 @@ Amaretto::char_t Amaretto::Canvas::GetCharUnsafe(const Vec2D &p_pos) const {
 }
 
 void Amaretto::Canvas::ColorCharUnsafe(const Vec2D &p_pos) {
+	wchar_t buffCh;
 #ifdef AMARETTO_PLATFORM_LINUX
+#	ifdef AMARETTO_WIDECHAR
+
+	cchar_t cchIn, cch;
+	mvin_wch(p_pos.y, p_pos.x, &cchIn);
+	buffCh = cchIn.chars[0];
+
+	setcchar(&cch, cchIn.chars, cchIn.attr, m_currColorPair, nullptr);
+
+	mvadd_wch(p_pos.y, p_pos.x, &cch);
+
+#	else
 
 	chtype ch = mvinch(p_pos.y, p_pos.x);
+	buffCh = ch;
 
-	mvaddch(p_pos.y, p_pos.x, ch & A_CHARTEXT);
+	if (ch & A_ALTCHARSET) {
+		attron(A_ALTCHARSET);
 
+		mvaddch(p_pos.y, p_pos.x, ch & A_CHARTEXT);
+
+		attroff(A_ALTCHARSET);
+	} else
+		mvaddch(p_pos.y, p_pos.x, ch & A_CHARTEXT);
+
+#	endif // AMARETTO_WIDECHAR
 #elif defined(AMARETTO_PLATFORM_WINDOWS)
 
-	std::size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+	if (p_pos < *g_window or p_pos > *g_window)
+		return;
 
-	g_screen[pos].Attributes = m_lastAttribute;
+	size_t pos = p_pos.y * g_window->size.x + p_pos.x;
+
+	g_screen[pos].Attributes = m_currAttr;
+	buffCh = g_screen[pos].Char.UnicodeChar;
 
 #endif // AMARETTO_PLATFORM_WINDOWS
+
+	if (m_record) {
+		Vec2D pos = p_pos - m_rect.pos;
+
+		m_buffer[pos.y][pos.x].ch = buffCh;
+		m_buffer[pos.y][pos.x].fg = m_fg;
+		m_buffer[pos.y][pos.x].bg = m_bg;
+	}
 }
 
 #ifdef AMARETTO_PLATFORM_LINUX
@@ -1505,8 +2099,8 @@ uint8_t Amaretto::Canvas::CheckForColorPair(Color p_fg, Color p_bg) {
 		p_bg = static_cast<Color>(static_cast<int>(p_bg) - COLORS);
 
 	// check if the color pair exists
-	for (std::size_t i = 0; i <= g_colorPair; ++ i) {
-		int16_t fg, bg;
+	for (size_t i = 0; i <= g_colorPair; ++ i) {
+		short fg, bg;
 		pair_content(i, &fg, &bg);
 
 		if (static_cast<short>(p_fg) == fg and static_cast<short>(p_bg) == bg)

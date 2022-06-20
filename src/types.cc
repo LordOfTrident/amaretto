@@ -1,4 +1,5 @@
 #include "../headers/types.hh"
+#include "private.hh"
 
 // struct Vec2D
 // public
@@ -9,6 +10,16 @@ Amaretto::Vec2D::Vec2D(pos_t p_x, pos_t p_y):
 {}
 
 Amaretto::Vec2D::Vec2D(size_t p_x, size_t p_y):
+	x(static_cast<pos_t>(p_x)),
+	y(static_cast<pos_t>(p_y))
+{}
+
+Amaretto::Vec2D::Vec2D(int p_x, size_t p_y):
+	x(static_cast<pos_t>(p_x)),
+	y(static_cast<pos_t>(p_y))
+{}
+
+Amaretto::Vec2D::Vec2D(size_t p_x, int p_y):
 	x(static_cast<pos_t>(p_x)),
 	y(static_cast<pos_t>(p_y))
 {}
@@ -75,6 +86,10 @@ Amaretto::Vec2D& Amaretto::Vec2D::operator /=(const Vec2D &p_pos) {
 	return *this;
 }
 
+bool Amaretto::Vec2D::IsInRect(const Rect &p_rect) const {
+	return not (*this < p_rect or *this > p_rect);
+}
+
 // struct Rect
 // public
 
@@ -105,6 +120,7 @@ bool Amaretto::Rect::operator !=(const Rect &p_rect) const {
 // public
 
 Amaretto::Border::Border(
+	Color  p_shadeColor,
 	char_t p_tlChar,
 	char_t p_trChar,
 	char_t p_brChar,
@@ -112,6 +128,7 @@ Amaretto::Border::Border(
 	char_t p_hChar,
 	char_t p_vChar
 ):
+	shadeColor(p_shadeColor),
 	tlChar(p_tlChar),
 	trChar(p_trChar),
 	brChar(p_brChar),
@@ -138,25 +155,31 @@ Amaretto::CharInfo::CharInfo(char_t p_ch, Color p_clr):
 // class Pattern
 // public
 
-Amaretto::Pattern::Pattern(const std::vector<CharInfo> &p_patt, Dir p_dir):
+Amaretto::Pattern::Pattern(const Buffer &p_patt, Dir p_dir):
 	m_size(p_patt.size(), static_cast<size_t>(1)),
 	m_patt(p_patt),
 	m_dir(p_dir)
 {}
 
-Amaretto::Pattern::Pattern(const Vec2D &p_size, const std::vector<CharInfo> &p_patt, Dir p_dir):
+Amaretto::Pattern::Pattern(const Vec2D &p_size, const Buffer &p_patt, Dir p_dir):
 	m_size(p_size),
 	m_patt(p_patt),
 	m_dir(p_dir)
 {
-	m_patt.resize(m_size.x * m_size.y, CharInfo(' '));
+	m_patt.resize(m_size.y, {});
+
+	for (auto &row : m_patt)
+		row.resize(m_size.x, CharInfo(' '));
 }
 
 Amaretto::Pattern::Pattern(const Vec2D &p_size, Dir p_dir):
 	m_size(p_size),
 	m_dir(p_dir)
 {
-	m_patt.resize(m_size.x * m_size.x, CharInfo(' '));
+	m_patt.resize(m_size.y, {});
+
+	for (auto &row : m_patt)
+		row.resize(m_size.x, CharInfo(' '));
 }
 
 void Amaretto::Pattern::SetDir(Dir p_dir) {
@@ -194,40 +217,33 @@ Amaretto::Vec2D Amaretto::Pattern::GetSize() const {
 void Amaretto::Pattern::SetSize(const Vec2D &p_size) {
 	m_size = p_size;
 
-	m_patt.resize(m_size.x * m_size.y, CharInfo(' '));
+	m_patt.resize(m_size.y, {});
+
+	for (auto &row : m_patt)
+		row.resize(m_size.x, CharInfo(' '));
 }
 
-void Amaretto::Pattern::StrFrom(const Vec2D &p_pos, const string &p_str, Color p_fg, Color p_bg) {
-	size_t pos = m_size.x * p_pos.y + p_pos.x;
-
-	for (auto ch : p_str) {
-		m_patt.at(pos) = CharInfo(ch, p_fg, p_bg);
-
-		++ pos;
-	}
+Amaretto::CharInfo &Amaretto::Pattern::operator [](const Vec2D &p_pos) {
+	return m_patt[p_pos.y][p_pos.x];
 }
 
-Amaretto::CharInfo &Amaretto::Pattern::operator [](size_t p_idx) {
-	return m_patt[p_idx];
-}
-
-const Amaretto::CharInfo &Amaretto::Pattern::operator [](size_t p_idx) const {
-	return m_patt[p_idx];
+const Amaretto::CharInfo &Amaretto::Pattern::operator [](const Vec2D &p_pos) const {
+	return m_patt[p_pos.y][p_pos.x];
 }
 
 Amaretto::CharInfo &Amaretto::Pattern::At(const Vec2D &p_pos) {
-	return m_patt.at(m_size.x * p_pos.y + p_pos.x);
+	return m_patt[p_pos.y][p_pos.x];
 }
 
 const Amaretto::CharInfo &Amaretto::Pattern::At(const Vec2D &p_pos) const {
-	return m_patt.at(m_size.x * p_pos.y + p_pos.x);
+	return m_patt[p_pos.y][p_pos.x];
 }
 
-const std::vector<Amaretto::CharInfo> &Amaretto::Pattern::GetVector() const {
+const Amaretto::Buffer &Amaretto::Pattern::GetVector() const {
 	return m_patt;
 }
 
-void Amaretto::Pattern::SetVector(const std::vector<CharInfo> &p_patt) {
+void Amaretto::Pattern::SetVector(const Buffer &p_patt) {
 	m_patt = p_patt;
 }
 
@@ -245,4 +261,39 @@ auto Amaretto::Pattern::begin() const {
 
 auto Amaretto::Pattern::end() const {
 	return End();
+}
+
+// class Event
+// public
+
+Amaretto::Event::Event(
+	EventType p_eventType,
+	uint16_t p_key,
+	const Vec2D &p_mousePos, MouseState p_mouseState, bool p_mouseMoved
+):
+	m_eventType(p_eventType),
+	m_key(p_key),
+	m_mousePos(p_mousePos),
+	m_mouseState(p_mouseState),
+	m_mouseMoved(p_mouseMoved)
+{}
+
+Amaretto::EventType Amaretto::Event::GetEventType() const {
+	return m_eventType;
+}
+
+Amaretto::uint16_t Amaretto::Event::GetKey() const {
+	return m_key;
+}
+
+const Amaretto::Vec2D &Amaretto::Event::GetMousePos() const {
+	return m_mousePos;
+}
+
+Amaretto::MouseState Amaretto::Event::GetMouseState() const {
+	return m_mouseState;
+}
+
+bool Amaretto::Event::MouseMoved() const {
+	return m_mouseMoved;
 }

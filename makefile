@@ -24,10 +24,12 @@ else
 	CLEAN = rm -r -f bin/*
 
 	INSTALL = \
-		cp ./bin/libamaretto.* /usr/lib/x86_64-linux-gnu/ && \
+		cp ./bin/libamaretto.* /usr/lib/ && \
 		mkdir -p /usr/include/amaretto && cp ./headers/* /usr/include/amaretto/
 
-	CXX_LIBS = -lncurses
+	WIDECHAR = true
+
+	CXX_LIBS = -lncursesw
 endif
 
 shared: ./bin $(OBJ) $(SRC)
@@ -41,6 +43,10 @@ bin/%.o: src/%.cc $(DEPS)
 
 tests: ./bin $(OBJ) $(LIB)*
 	$(CXX) ./tests/graphics.cc -o ./bin/graphics -L./bin/ -lamaretto $(CXX_LIBS)
+	$(CXX) ./tests/mouse.cc -o ./bin/mouse -L./bin/ -lamaretto $(CXX_LIBS)
+
+examples: ./bin $(OBJ) $(LIB)*
+	$(CXX) ./examples/painting.cc -o ./bin/painting -L./bin/ -lamaretto $(CXX_LIBS)
 
 ./bin:
 	mkdir -p bin
@@ -52,4 +58,4 @@ install:
 	$(INSTALL)
 
 all:
-	@echo shared, static, tests, clean, install
+	@echo shared, static, tests, examples, clean, install

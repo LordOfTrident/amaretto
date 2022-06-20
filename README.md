@@ -21,11 +21,14 @@
 * [Bugs](#bugs)
 * [Documentation](#documentation)
 * [Dependencies](#dependencies)
+  * [Linux](#linux)
 * [Make](#make)
 
 ## Introduction
 A [C++](https://en.wikipedia.org/wiki/C%2B%2B) [terminal](https://en.wikipedia.org/wiki/Terminal_emulator) [input/output](https://en.wikipedia.org/wiki/Input/output)
 library for [Linux](https://en.wikipedia.org/wiki/Linux) and [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows).
+<br><br>
+This was another experiment of mine, not actually intended for production. You can use it if you want, though.
 
 ## Features
 - [X] Basic colored output
@@ -42,6 +45,10 @@ library for [Linux](https://en.wikipedia.org/wiki/Linux) and [Windows](https://e
 - [ ] Mouse events
 
 ## Bugs
+- When cbreak is enabled and the program listens to mouse movement/scrolling events, the ansi
+escape sequence to turn off those events wont run, so on some terminals it might be goofy on CTRL+C
+exit (tested gnome-terminal, xfce4-terminal)
+
 If you find any bugs, please create an issue and report them.
 
 ## Documentation
