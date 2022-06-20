@@ -39,7 +39,7 @@ static: ./bin $(OBJ) $(SRC)
 	$(AR) rcs $(LIB)$(STATIC) $(OBJ)
 
 bin/%.o: src/%.cc $(DEPS)
-	$(CXX) -c -fPIC $< $(CXX_FLAGS) -o $@  $(CXX_LIBS)
+	$(CXX) -c -fPIC $< $(CXX_FLAGS) -o $@ $(CXX_LIBS)
 
 tests: ./bin $(OBJ) $(LIB)*
 	$(CXX) ./tests/graphics.cc -o ./bin/graphics -L./bin/ -lamaretto $(CXX_LIBS)
