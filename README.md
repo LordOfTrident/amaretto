@@ -41,8 +41,8 @@ This was another experiment of mine, not actually intended for production. You c
 - [X] Pattern drawing functions
 - [X] Border drawing functions
 - [X] Color-only/character-only drawing functions
-- [ ] Special characters outputting
-- [ ] Mouse events
+- [X] Wide characters support
+- [X] Mouse events
 
 ## Bugs
 - When cbreak is enabled and the program listens to mouse movement/scrolling events, the ansi
